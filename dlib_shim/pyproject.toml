@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dlib"
+version = "19.24.6"
+description = "dlib shim for dlib-bin"
+dependencies = [
+    "dlib-bin"
+]

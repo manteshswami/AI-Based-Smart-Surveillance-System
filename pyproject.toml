@@ -13,7 +13,7 @@ dependencies = [
     "numpy",
     "opencv-python>=4.13.0.92",
     "openpyxl>=3.1.5",
-    "setuptools>=82.0.1",
+    "setuptools<82.0.0",
     "ultralytics",
     # ── Dashboard ─────────────────────────────────────────────────────────────
     "streamlit>=1.35.0",
@@ -32,3 +32,4 @@ dependencies = [
 
 [tool.uv.sources]
 face-recognition-models = { git = "https://github.com/ageitgey/face_recognition_models" }
+dlib = { path = "dlib_shim" }
