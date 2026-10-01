@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: dlib
+Version: 19.24.6
+Summary: dlib shim for dlib-bin
+Requires-Dist: dlib-bin

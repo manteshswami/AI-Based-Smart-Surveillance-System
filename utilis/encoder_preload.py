@@ -36,7 +36,8 @@ def _encodings_from_dir(person_dir: str) -> list:
             enc   = face_recognition.face_encodings(image, num_jitters=config.NUM_JITTERS)
             if enc:
                 encodings.append(enc[0])
-                print(f"[ENCODER]     + {fname} ✓")
+                print(f"[ENCODER]     + {fname} (selected primary face) ✓")
+                break
             else:
                 print(f"[ENCODER]     - {fname} — no face detected, skipping")
         except Exception as e:
@@ -70,24 +71,24 @@ def load_criminal_encodings() -> tuple[list, list, dict]:
 
     profiles = load_criminal_profiles()
 
-    if not os.path.exists(config.CRIMINALS_DIR):
-        print(f"[ENCODER] criminal_images/ not found: {config.CRIMINALS_DIR}")
-        return known_encodings, known_names, profiles
+    if not os.path.isdir(config.CRIMINALS_DIR):
+        os.makedirs(config.CRIMINALS_DIR, exist_ok=True)
+        print(f"[ENCODER] created missing criminal_images/ directory at: {config.CRIMINALS_DIR}")
 
     for name, profile in profiles.items():
         person_dir = os.path.join(config.CRIMINALS_DIR, name)
 
         # ── Multi-image path: criminal_images/{name}/ ─────────────────────────
         if os.path.isdir(person_dir):
-            print(f"[ENCODER] '{name}' — multi-image folder found")
+            print(f"[ENCODER] '{name}' — folder found")
             encs = _encodings_from_dir(person_dir)
             if not encs:
                 print(f"[ENCODER] WARNING: No valid faces in {person_dir}/ — skipping '{name}'")
                 continue
-            avg_enc = np.mean(encs, axis=0).astype(np.float64)
-            known_encodings.append(avg_enc)
+            primary_enc = encs[0].astype(np.float64)
+            known_encodings.append(primary_enc)
             known_names.append(name)
-            print(f"[ENCODER] '{name}' → averaged {len(encs)} encoding(s) ✓")
+            print(f"[ENCODER] '{name}' → loaded primary face encoding ✓")
             continue
 
         # ── Single-image path ─────────────────────────────────────────────────

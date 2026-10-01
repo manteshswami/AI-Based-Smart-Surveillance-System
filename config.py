@@ -72,11 +72,15 @@ RISK_LEVELS = [
 # ── VLM / Gemini ──────────────────────────────────────────────────────────────
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "")
 VLM_MODEL       = os.getenv("VLM_MODEL", "gemini-2.5-flash")
-VLM_TIMEOUT     = 60  # seconds
+VLM_PROVIDER    = os.getenv("VLM_PROVIDER", "gemini")  # "gemini" or "ollama"
+LOCAL_VLM_MODEL = os.getenv("LOCAL_VLM_MODEL", "gemma4:e4b")
+VLM_TIMEOUT               = 60    # seconds per request
+VLM_CALL_INTERVAL_SECONDS = 12.0  # min seconds between Gemini calls (3 pooled keys = 15 req/min capacity!)
+VLM_FRAME_BUFFER          = 10    # collect candidate frames, send best to VLM
 
 # ── Ollama (local LLM for agent + embeddings) ─────────────────────────────────
 OLLAMA_BASE_URL  = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-AGENT_LLM_MODEL  = os.getenv("AGENT_LLM_MODEL", "gemma4:e2b")
+AGENT_LLM_MODEL  = os.getenv("AGENT_LLM_MODEL", "llama3.2:3b")
 EMBEDDING_MODEL  = "nomic-embed-text"
 
 # ── Databases (SQLite + ChromaDB) ────────────────────────────────────────────
@@ -99,8 +103,8 @@ ALERT_RULES = {
         "severity":    "MEDIUM",
     },
     "crowd_detected": {
-        "description": "3 or more people detected simultaneously",
-        "min_count":   3,
+        "description": "5 or more people detected simultaneously",
+        "min_count":   5,
         "objects":     ["person"],
         "severity":    "MEDIUM",
     },
@@ -127,20 +131,49 @@ ALERT_RULES = {
 # ── Camera / Video Source ───────────────────────────────────────────────────
 DATA_SAMPLE_DIR = BASE_DIR / "data_sample"   # local video files (.mp4/.avi)
 
+# ── Camera Roles ─────────────────────────────────────────────────────────────
+# Each zone uses two cameras:
+#   ROLE_FACE  (close-up) — zoomed in on entry/face area; runs face recognition
+#   ROLE_SCENE (wide-angle) — full scene view; runs VLM threat analysis
+#   ROLE_BOTH  — single-cam fallback; runs the full pipeline
+ROLE_FACE  = "face"    # close-up cam  → face recognition only, no VLM
+ROLE_SCENE = "scene"   # wide-angle cam → VLM scene analysis only, no face recog
+ROLE_BOTH  = "both"    # single-cam or unclassified → full pipeline
+
+# Map camera source (int index or filename stem) → role
+# Update this when you add new cameras.
+CAMERA_ROLES: dict = {
+    0: ROLE_FACE,    # CAM-A: close-up — feeds face recognition
+    1: ROLE_SCENE,   # CAM-B: wide-angle — feeds VLM scene analysis
+    2: ROLE_BOTH,    # CAM-C: single-cam fallback
+    "bank_face":    ROLE_FACE,
+    "bank_scene":   ROLE_SCENE,
+    "street_face":  ROLE_FACE,
+    "street_scene": ROLE_SCENE,
+    "atm_face":     ROLE_FACE,
+    "atm_scene":    ROLE_SCENE,
+    "parking_face": ROLE_FACE,
+    "parking_scene":ROLE_SCENE,
+}
+
 # Named location labels for each camera source.
 # Key: webcam device index (int) or video filename stem (str)
 # Value: human-readable location label shown in dashboard and alerts
 CAMERA_LOCATIONS: dict = {
-    0:             "Main Entrance",
-    1:             "Parking Lot",
-    2:             "Street Corner",
-    "bank":        "Bank Branch — Counter Area",
-    "street":      "Street — Junction",
-    "shop":        "Retail Shop — Floor",
-    "office":      "Office — Reception",
-    "parking":     "Parking Lot — Zone A",
-    "atm":         "ATM Vestibule",
-    "warehouse":   "Warehouse — Loading Bay",
+    0:               "Main Entrance — Close-up (CAM-A)",
+    1:               "Main Entrance — Wide-angle (CAM-B)",
+    2:               "Secondary Zone",
+    "bank_face":     "Bank Branch — Counter (Face Cam)",
+    "bank_scene":    "Bank Branch — Floor (Scene Cam)",
+    "street_face":   "Street Junction — Entry (Face Cam)",
+    "street_scene":  "Street Junction — Overview (Scene Cam)",
+    "shop":          "Retail Shop — Floor",
+    "office":        "Office — Reception",
+    "parking_face":  "Parking Lot — Entry (Face Cam)",
+    "parking_scene": "Parking Lot — Overview (Scene Cam)",
+    "atm_face":      "ATM Vestibule — Face Cam",
+    "atm_scene":     "ATM Vestibule — Scene Cam",
+    "warehouse":     "Warehouse — Loading Bay",
 }
 DEFAULT_LOCATION = "Surveillance Zone"   # fallback when no label is configured
 

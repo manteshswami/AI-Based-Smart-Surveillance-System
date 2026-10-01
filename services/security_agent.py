@@ -101,7 +101,7 @@ def _query_criminal_alerts(name: str) -> str:
         if alerts:
             lines.append(f"\nAlerts triggered ({len(alerts)}):")
             for a in alerts[:5]:
-                lines.append(f"  [{a['severity']}] {a['timestamp'][:16]} — {a['alert_text'][:80]}")
+                lines.append(f"  [{a['severity']}] {a['timestamp'][:16]} — {a['alert_text']}")
         return "\n".join(lines)
     except Exception as exc:
         return f"Error querying criminal '{name}': {exc}"
@@ -159,7 +159,7 @@ def _get_all_alerts(severity: str = "") -> str:
         for a in alerts[:10]:
             ts = a["timestamp"][:16]
             lines.append(
-                f"[{a['severity']}] {ts} | {a['location']} → {a['alert_text'][:100]}"
+                f"[{a['severity']}] {ts} | {a['location']} -> {a['alert_text']}"
             )
         return f"Found {len(alerts)} alert(s):\n" + "\n".join(lines)
     except Exception as exc:
@@ -198,7 +198,7 @@ def get_alerts(severity: str = "") -> str:
 
 TOOLS = [summarize_today, semantic_search, query_criminal_alerts, get_risk_breakdown, get_alerts]
 
-SYSTEM_PROMPT = """You are WatchAI ,an expert CCTV Security Analyst AI for a ground-level surveillance system.
+SYSTEM_PROMPT = """You are WatchAI, an expert CCTV Security Analyst AI for a ground-level surveillance system.
 You monitor real-world locations including banks, street junctions, retail shops, office lobbies, parking lots, and ATMs.
 You have access to a live database of CCTV events captured by fixed security cameras.
 
@@ -214,15 +214,23 @@ Always:
 - Flag HIGH and CRITICAL alerts prominently
 - Suggest concrete actions (e.g. "contact law enforcement", "review camera footage from 21:30-22:00")
 - Be direct and precise — this is a security-critical system
+- Ground your answers strictly in the tool outputs. Do not invent any incidents, names, locations, or details not returned by a tool.
+- If a tool returns truncated descriptions (e.g., text cut off mid-sentence), present them exactly as they are. Do not attempt to complete or make up details for truncated logs.
 
 CRITICAL: Never return an empty response. Always call a tool first to gather data, then provide a clear answer."""
 
 
 # ── Agent builder ─────────────────────────────────────────────────────────────
 
-def build_agent(llm_model: str = config.AGENT_LLM_MODEL):
+def build_agent(llm_model: str | None = None):
     """Build and return the LangGraph ReAct agent (Ollama-backed)."""
     try:
+        import config
+        import importlib
+        importlib.reload(config)
+        if llm_model is None:
+            llm_model = config.AGENT_LLM_MODEL
+
         from langchain_ollama import ChatOllama
         from langgraph.prebuilt import create_react_agent
         from langgraph.checkpoint.memory import MemorySaver

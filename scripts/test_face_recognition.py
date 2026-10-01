@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
 """
-WatchAI — Face Recognition Test Suite
-Tests the full face recognition pipeline against enrolled criminal images.
+WatchAI
 
-Tests performed:
-  1. Self-recognition: every enrolled image should match its own person
-  2. Threshold sensitivity: show distance distribution to help tune threshold
-  3. Optional: test recognition on an arbitrary external image
-
-Usage:
-    uv run python scripts/test_face_recognition.py
-    uv run python scripts/test_face_recognition.py --image /path/to/test.jpg
-    uv run python scripts/test_face_recognition.py --verbose
 """
 import os
 import sys
@@ -175,7 +165,7 @@ if __name__ == "__main__":
     if not args.verbose:
         # Suppress per-match debug prints from recognizer
         import services.recognizer as _rec
-        _rec_orig = _rec.print
+        # _rec_orig = _rec.print
         # (print suppression not strictly needed — logs go to stdout anyway)
 
     print(f"\n{B}WatchAI — Face Recognition Test Suite{RST}")

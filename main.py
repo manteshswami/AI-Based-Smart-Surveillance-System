@@ -87,6 +87,25 @@ def get_camera_location(source) -> str:
     return config.DEFAULT_LOCATION
 
 
+def get_camera_role(source) -> str:
+    """
+    Resolve a camera source → role string (ROLE_FACE / ROLE_SCENE / ROLE_BOTH).
+
+    - ROLE_FACE  : close-up camera — runs face recognition, skips VLM
+    - ROLE_SCENE : wide-angle camera — runs VLM scene analysis, skips face recog
+    - ROLE_BOTH  : single-cam or unclassified — runs full pipeline
+    """
+    if isinstance(source, int):
+        return config.CAMERA_ROLES.get(source, config.ROLE_BOTH)
+
+    stem = Path(str(source)).stem.lower()
+    for key, role in config.CAMERA_ROLES.items():
+        if isinstance(key, str) and (key in stem or stem in key):
+            return role
+
+    return config.ROLE_BOTH
+
+
 def _on_cooldown(name: str) -> bool:
     """True if this criminal has been alerted in the last ALERT_COOLDOWN_SECONDS."""
     ts = _last_alerts.get(name)
@@ -120,21 +139,34 @@ def _append_log(path: str, data):
 # ── Main pipeline step ────────────────────────────────────────────────────────
 
 def run_pipeline_step(
-    cap:         cv2.VideoCapture,
-    frame_id:    int,
-    location:    str,
-    camera_id:   str = "CAM-01",
-    skip_motion: bool = False,
+    cap:             cv2.VideoCapture,
+    frame_id:        int,
+    location:        str,
+    camera_id:       str = "CAM-01",
+    skip_motion:     bool = False,
+    camera_role:     str = config.ROLE_BOTH,
+    criminal_context: dict | None = None,
+    past_context:    list[str] | None = None,
+    bypass_buffer:   bool = False,
 ) -> Optional[dict]:
     """
     Process ONE frame from the VideoCapture source through the full pipeline.
 
     Args:
-        cap          : open cv2.VideoCapture object
-        frame_id     : monotonically increasing frame counter
-        location     : human-readable camera location string
-        camera_id    : camera identifier string
-        skip_motion  : if True, bypass the motion gate (always process)
+        cap              : open cv2.VideoCapture object
+        frame_id         : monotonically increasing frame counter
+        location         : human-readable camera location string
+        camera_id        : camera identifier string
+        skip_motion      : if True, bypass the motion gate (always process)
+        camera_role      : one of config.ROLE_FACE / ROLE_SCENE / ROLE_BOTH
+                           ROLE_FACE  — close-up cam: runs face recognition, skips VLM
+                           ROLE_SCENE — wide-angle cam: runs VLM, skips face recognition
+                           ROLE_BOTH  — full pipeline (default / single-cam fallback)
+        criminal_context : optional dict forwarded from a paired Camera 1 (face cam).
+                           When provided, the VLM receives the criminal's profile as
+                           additional context for a smarter threat assessment.
+                           Keys: name, risk_score, risk_level, crime_type,
+                                 legal_status, face_confidence
 
     Returns:
         event dict on success, None if frame read fails or motion gate blocks.
@@ -143,7 +175,12 @@ def run_pipeline_step(
 
     ret, frame = cap.read()
     if not ret or frame is None:
-        return None
+        # If it's a video file (frame count > 0), rewind and loop
+        if cap.get(cv2.CAP_PROP_FRAME_COUNT) > 0:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = cap.read()
+        if not ret or frame is None:
+            return None
 
     if config.WEBCAM_ROTATION:
         frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
@@ -160,13 +197,16 @@ def run_pipeline_step(
     detections   = _yolo.detect(frame)
     person_boxes = _yolo.person_boxes(detections)
 
-    # ── 3. Face recognition ──────────────────────────────────────────────────
+    # ── 3. Face recognition ───────────────────────────────────────────────
+    # Skip on pure scene cameras — faces are too small/far for reliable matching.
     criminal_name   = ""
     risk_score      = 0
     risk_level      = "LOW"
     face_confidence = 0.0
 
-    if person_boxes and _encodings:
+    run_face_recog = camera_role in (config.ROLE_FACE, config.ROLE_BOTH)
+
+    if run_face_recog and person_boxes and _encodings:
         frame_rgb = np.ascontiguousarray(raw_frame[:, :, ::-1])
         matches   = recognize_faces_in_frame(frame_rgb, _encodings, _names)
 
@@ -185,14 +225,31 @@ def run_pipeline_step(
                 if not _on_cooldown(name):
                     _last_alerts[name] = datetime.now()
 
-    # ── 4. VLM scene analysis ────────────────────────────────────────────────
-    vlm_result = _vlm.analyze(
-        image=raw_frame,
-        detections=detections,
-        location=location,
-        timestamp=timestamp,
-        camera_id=camera_id,
-    )
+    # Inherit context from Camera 1 if Camera 2 (scene cam) receives it
+    if not criminal_name and criminal_context:
+        criminal_name   = criminal_context.get("name", "")
+        risk_score      = criminal_context.get("risk_score", 0)
+        risk_level      = criminal_context.get("risk_level", "LOW")
+        face_confidence = criminal_context.get("face_confidence", 0.0)
+
+    # ── 4. VLM scene analysis ────────────────────────────────────────────
+    # Skip on pure face cameras — use fallback (rule-based) to keep latency low.
+    run_vlm = camera_role in (config.ROLE_SCENE, config.ROLE_BOTH)
+
+    if run_vlm:
+        vlm_result = _vlm.analyze(
+            image=raw_frame,
+            detections=detections,
+            location=location,
+            timestamp=timestamp,
+            camera_id=camera_id,
+            criminal_context=criminal_context,  # None for standalone, dict from Cam1 for scene cam
+            past_context=past_context,
+            bypass_buffer=bypass_buffer,
+        )
+    else:
+        # Lightweight fallback for face-only cameras
+        vlm_result = _vlm._fallback(detections, location)
 
     # ── 5. Annotate display frame ────────────────────────────────────────────
     from app.display import draw_result, draw_status
@@ -240,7 +297,7 @@ def run_pipeline_step(
     _append_log(config.JSON_LOG_PATH, {k: v for k, v in event.items()
                                         if k != "display_frame"})
     if triggered:
-        with open(config.ALERT_LOG_PATH, "a") as f:
+        with open(config.ALERT_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(alert_engine.format_alert_log(triggered) + "\n")
 
     return event

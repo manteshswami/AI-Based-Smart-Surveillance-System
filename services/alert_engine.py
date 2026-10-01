@@ -106,8 +106,9 @@ def evaluate(event: Dict) -> List[Dict]:
         ))
 
     # ── Rule 3: Crowd gathering ────────────────────────────────────────────────
+    crowd_limit = config.ALERT_RULES.get("crowd_detected", {}).get("min_count", 5)
     person_count = objects.count("person")
-    if person_count >= 3:
+    if person_count >= crowd_limit:
         triggered.append(_make(
             "crowd_gathering",
             f"Crowd of {person_count} people detected at {location} ({_time_str()}). "
@@ -153,6 +154,16 @@ def evaluate(event: Dict) -> List[Dict]:
             "CRITICAL",
         ))
 
+    # ── Rule 8: Dual camera confirmation ──────────────────────────────────────
+    # If the scene camera sees a criminal matched by the face camera within TTL
+    if criminal_name and event.get("stream_source") == "cam2_scene":
+        triggered.append(_make(
+            "dual_cam_confirmation",
+            f"Wide-angle Scene camera confirms target '{criminal_name.title()}' present in zone. "
+            f"VLM security assessment: {threat_level}.",
+            "CRITICAL" if threat_level == "HIGH" else "HIGH",
+        ))
+
     if triggered:
         logger.warning(
             f"[ALERT] {len(triggered)} rule(s) triggered — frame {frame_id} "
@@ -171,6 +182,6 @@ def format_alert_log(alerts: List[Dict]) -> str:
             ts = a.get("timestamp", "?")
         lines.append(
             f"[{a['severity']}] {ts} | {a['location']} ({a.get('camera_id','?')}) "
-            f"| {a['rule_name']}\n  → {a['alert_text']}"
+            f"| {a['rule_name']}\n  -> {a['alert_text']}"
         )
     return "\n".join(lines)
